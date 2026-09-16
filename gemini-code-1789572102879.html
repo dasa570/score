@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>수능 성적 기록장</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f5f6f8;color:#20242a}
+header{background:#fff;border-bottom:1px solid #e5e7eb;padding:20px 24px;position:sticky;top:0;z-index:2}
+.wrap{max-width:1100px;margin:auto}
+.brand{font-size:22px;font-weight:800}
+.sub{color:#7b818a;font-size:13px;margin-top:4px}
+main{padding:28px 20px}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.card{background:#fff;border:1px solid #e6e8eb;border-radius:16px;padding:18px}
+.label{font-size:13px;color:#777}
+.value{font-size:27px;font-weight:800;margin-top:8px}
+.section{margin-top:22px}
+.section h2{font-size:18px;margin:0 0 12px}
+.panel{background:#fff;border:1px solid #e6e8eb;border-radius:16px;padding:20px}
+form{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+.field label{display:block;font-size:12px;color:#666;margin-bottom:6px;height:18px;line-height:18px}
+.field input,.field select{width:100%;padding:10px;border:1px solid #d9dce1;border-radius:9px;background:#fff;height:40px}
+.btn{border:0;border-radius:9px;padding:10px 14px;font-weight:700;cursor:pointer;font-size:13px;height:40px}
+.primary{background:#20242a;color:#fff}
+.secondary{background:#f0f2f5;color:#4b5563}
+.danger{background:#fff1f1;color:#c33}
+.actions{display:flex;gap:8px;align-items:end}
+.table{width:100%;border-collapse:collapse;font-size:14px}
+.table th,.table td{padding:12px 8px;border-bottom:1px solid #eee;text-align:center}
+.table th{color:#777;font-size:12px}
+.chartbox{height:330px}
+.empty{text-align:center;color:#999;padding:45px 0}
+@media(max-width:900px){form{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:800px){.grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:500px){main{padding:18px 12px}.grid{grid-template-columns:1fr 1fr}.card{padding:14px}.value{font-size:22px}form{grid-template-columns:1fr}.table{font-size:12px}.chartbox{height:260px}}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:20;padding:16px}
+.modal{background:#fff;border-radius:16px;padding:20px;width:360px;max-width:100%;max-height:80vh;overflow:auto}
+.modal h3{margin:0 0 14px;font-size:16px}
+.modal-item{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid #eee;font-size:14px}
+.modal-close{margin-top:14px;width:100%}
+.type-edit-btn{border:0;background:none;color:#7b818a;font-size:12px;cursor:pointer;text-decoration:underline;padding:0;line-height:18px}
+.tab-group{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.tab-btn{display:inline-flex;align-items:center;gap:4px;border:1px solid #ddd;border-radius:9px;padding:6px 10px;background:#fff;cursor:pointer}
+.tab-btn.active{background:#20242a;color:#fff;border-color:#20242a}
+.tab-btn .edit-icon{font-size:12px;opacity:0.6;margin-left:4px}
+.tab-btn .edit-icon:hover{opacity:1}
+</style>
+</head>
+<body>
+<header><div class="wrap"><div class="brand">수능 성적 기록장</div><div class="sub">모의고사 성적을 기록하고 변화 추이를 확인하세요.</div></div></header>
+<main class="wrap">
+<div class="section">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+  <h2 style="margin:0">과목</h2>
+  <button type="button" class="btn secondary" onclick="addSubject()" style="height:auto"> + 과목 추가</button>
+</div>
+<div id="subjectTabs" class="tab-group"></div>
+</div>
+
+<div id="subjectView"></div>
+</main>
+<script>
+const KEY="suneung_scores_v7";
+const CATKEY="suneung_subject_names_v1";
+const TYPEKEY="suneung_exam_types_v1";
+const DEFAULT_CATEGORIES=["국어","수학","영어","탐구1","탐구2"];
+const DEFAULT_TYPES=["교육청 모의고사","평가원 모의평가"];
+
+let categories=JSON.parse(localStorage.getItem(CATKEY)||JSON.stringify(DEFAULT_CATEGORIES));
+let examTypesMap=JSON.parse(localStorage.getItem(TYPEKEY)||"{}");
+let data=JSON.parse(localStorage.getItem(KEY)||"[]");
+let selectedSubject=categories[0]||"국어";
+const $=id=>document.getElementById(id);
+let chart;
+
+function slug(s){return "c_"+btoa(unescape(encodeURIComponent(s))).replace(/[^a-zA-Z0-9]/g,"_")}
+function save(){
+  localStorage.setItem(KEY,JSON.stringify(data));
+  localStorage.setItem(CATKEY,JSON.stringify(categories));
+}
+function saveTypes(){
+  localStorage.setItem(TYPEKEY,JSON.stringify(examTypesMap));
+}
+function getTypesFor(subject){
+  if(!examTypesMap[subject])examTypesMap[subject]=[...DEFAULT_TYPES];
+  return examTypesMap[subject];
+}
+function subjectScores(subject){
+  const key=slug(subject);
+  return data.filter(x=>x[key]!==null&&x[key]!==""&&!isNaN(x[key]))
+             .sort((a,b)=>(a.date+" "+(a.created||0)).localeCompare(b.date+" "+(b.created||0)));
+}
+function avg(subject){
+  const arr=subjectScores(subject).map(x=>Number(x[slug(subject)]));
+  return arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:null;
+}
+function renderTabs(){
+  $("subjectTabs").innerHTML=categories.map(c=>`
+    <div class="tab-btn ${c===selectedSubject?"active":""}" onclick="selectSubject('${c.replace(/'/g,"\\'")}')">
+      <span>${c}</span>
+      <span class="edit-icon" onclick="renameSubject('${c.replace(/'/g,"\\'")}');event.stopPropagation()">✎</span>
+      ${categories.length>1?`<span class="edit-icon" onclick="deleteSubject('${c.replace(/'/g,"\\'")}');event.stopPropagation()">✕</span>`:""}
+    </div>
+  `).join("");
+}
+function addSubject(){
+  const name=prompt("새 과목 이름을 입력하세요.");
+  if(!name)return;
+  const trimmed=name.trim();
+  if(!trimmed)return;
+  if(categories.includes(trimmed)){
+    alert("이미 존재하는 과목 이름입니다.");
+    return;
+  }
+  categories.push(trimmed);
+  selectedSubject=trimmed;
+  save();
+  render();
+}
+function deleteSubject(name){
+  if(!confirm(`'${name}' 과목을 삭제하시겠습니까? 관련 성적 데이터도 함께 접근이 제한될 수 있습니다.`))return;
+  categories=categories.filter(c=>c!==name);
+  if(selectedSubject===name)selectedSubject=categories[0]||"";
+  save();
+  render();
+}
+function renameSubject(oldName){
+  const newName=prompt(`'${oldName}' 카테고리 이름을 입력하세요.`,oldName);
+  if(newName===null)return;
+  const name=newName.trim();
+  if(!name||name===oldName)return;
+  if(categories.includes(name)){
+    alert("이미 사용 중인 카테고리 이름입니다.");
+    return;
+  }
+  const oldKey=slug(oldName), newKey=slug(name);
+  data.forEach(item=>{
+    if(Object.prototype.hasOwnProperty.call(item,oldKey)){
+      item[newKey]=item[oldKey];
+      delete item[oldKey];
+    }
+  });
+  const idx=categories.indexOf(oldName);
+  if(idx!==-1)categories[idx]=name;
+  if(examTypesMap[oldName]){
+    examTypesMap[name]=examTypesMap[oldName];
+    delete examTypesMap[oldName];
+    saveTypes();
+  }
+  if(selectedSubject===oldName)selectedSubject=name;
+  save();
+  render();
+}
+function selectSubject(subject){
+  selectedSubject=subject;
+  render();
+}
+function render(){
+  renderTabs();
+  if(!selectedSubject){
+    $("subjectView").innerHTML='<div class="empty">등록된 과목이 없습니다. 과목을 추가해주세요.</div>';
+    return;
+  }
+  const scores=subjectScores(selectedSubject);
+  const a=avg(selectedSubject);
+  const best=scores.length?Math.max(...scores.map(x=>Number(x[slug(selectedSubject)]))):null;
+  const recentChange=scores.length>=2
+    ? Number(scores[scores.length-1][slug(selectedSubject)])-Number(scores[scores.length-2][slug(selectedSubject)])
+    : null;
+
+  const currentTypes=getTypesFor(selectedSubject);
+
+  $("subjectView").innerHTML=`
+    <div class="grid">
+      <div class="card"><div class="label">${selectedSubject} 응시 기록</div><div class="value">${scores.length}회</div></div>
+      <div class="card"><div class="label">${selectedSubject} 평균</div><div class="value">${a===null?"-":a.toFixed(1)}점</div></div>
+      <div class="card"><div class="label">최고 점수</div><div class="value">${best===null?"-":best+'점'}</div></div>
+      <div class="card"><div class="label">최근 변화</div><div class="value">${recentChange===null?"-":(recentChange>=0?"+":"")+recentChange.toFixed(1)}</div></div>
+    </div>
+
+    <div class="section"><h2>${selectedSubject} 성적 입력</h2><div class="panel">
+      <form id="form">
+        <div class="field"><label>시험 날짜</label><input id="date" type="date" required></div>
+        <div class="field"><label style="display:flex;justify-content:space-between;align-items:center"><span>시험 종류</span> <button type="button" class="type-edit-btn" onclick="openEditTypes()">편집</button></label>
+          <select id="type">
+            ${currentTypes.map(t=>`<option>${t}</option>`).join("")}
+            <option value="__add__">+ 시험 추가</option>
+          </select>
+        </div>
+        <div class="field"><label>회차 / 차수 (선택)</label><input id="roundInput" type="text" placeholder="예: 1회차, 3월"></div>
+        <div class="field"><label>점수</label><input id="scoreInput" type="number" min="0" max="100" placeholder="원점수" required></div>
+        <div class="actions"><button class="btn primary" type="submit" style="width:100%">성적 추가</button></div>
+      </form>
+    </div></div>
+
+    <div class="section"><h2>${selectedSubject} 점수 변화 추이</h2><div class="panel">
+      <div class="field" style="max-width:240px;margin-bottom:14px"><label>시험 필터</label>
+        <select id="chartTypeFilter">
+          ${currentTypes.map(t=>`<option>${t}</option>`).join("")}
+        </select>
+      </div>
+      <div class="chartbox"><canvas id="chart"></canvas></div>
+    </div></div>
+
+    <div class="section"><h2>${selectedSubject} 시험 기록</h2><div class="panel" id="tableWrap"></div></div>
+  `;
+
+  $("date").value=new Date().toISOString().slice(0,10);
+  $("type").addEventListener("change",()=>{
+    if($("type").value==="__add__"){
+      const name=prompt("추가할 시험 이름을 입력하세요.");
+      const t=name&&name.trim();
+      if(t){
+        const types=getTypesFor(selectedSubject);
+        if(!types.includes(t)){
+          types.push(t);
+          saveTypes();
+        }
+        render();
+        $("type").value=t;
+      }else{
+        const types=getTypesFor(selectedSubject);
+        $("type").value=types[0]||"__add__";
+      }
+    }
+  });
+  $("form").addEventListener("submit",addScore);
+  renderTable(scores);
+
+  const filterElem=$("chartTypeFilter");
+  if(filterElem && currentTypes.length>0){
+    const selectedFilter = filterElem.value || currentTypes[0];
+    renderChart(scores.filter(x=>x.type===selectedFilter));
+    filterElem.addEventListener("change",()=>{
+      const v=filterElem.value;
+      renderChart(scores.filter(x=>x.type===v));
+    });
+  } else {
+    renderChart([]);
+  }
+}
+function addScore(e){
+  e.preventDefault();
+  const type=$("type").value;
+  if(!type||type==="__add__"){alert("시험 종류를 선택해주세요.");return}
+  const item={
+    id:crypto.randomUUID(),
+    created:Date.now(),
+    date:$("date").value,
+    type:type,
+    round:$("roundInput").value.trim()
+  };
+  item[slug(selectedSubject)]=$("scoreInput").value;
+  data.push(item);
+  save();
+  render();
+}
+function renderTable(scores){
+  if(!scores.length){
+    $("tableWrap").innerHTML='<div class="empty">아직 입력된 성적이 없습니다.</div>';
+    return;
+  }
+  const key=slug(selectedSubject);
+  const rows=scores.slice().reverse().map(x=>`
+    <tr>
+      <td>${x.date}</td><td>${x.type}${x.round?' ('+x.round+')':''}</td><td><b>${x[key]}점</b></td>
+      <td>
+        <button class="btn secondary" style="padding:4px 8px;margin-right:4px;height:auto" onclick="editItem('${x.id}')">수정</button>
+        <button class="btn danger" style="padding:4px 8px;height:auto" onclick="removeItem('${x.id}')">삭제</button>
+      </td>
+    </tr>`).join("");
+  $("tableWrap").innerHTML=`
+    <div style="overflow:auto"><table class="table">
+      <thead><tr><th>날짜</th><th>시험 (회차)</th><th>${selectedSubject}</th><th>관리</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+}
+function editItem(id){
+  const item=data.find(x=>x.id===id);
+  if(!item)return;
+  const key=slug(selectedSubject);
+  const newScore=prompt("수정할 점수를 입력하세요.",item[key]);
+  if(newScore===null)return;
+  const num=Number(newScore);
+  if(isNaN(num)||num<0||num>100){
+    alert("0~100 사이의 숫자를 입력하세요.");
+    return;
+  }
+  const newRound=prompt("수정할 회차를 입력하세요. (선택)",item.round||"");
+  if(newRound!==null)item.round=newRound.trim();
+  item[key]=num;
+  save();
+  render();
+}
+function renderChart(scores){
+  const key=slug(selectedSubject);
+  const labels=scores.map(x=>x.type+(x.round?' '+x.round:'')+" ("+x.date.slice(5)+")");
+  const vals=scores.map(x=>Number(x[key]));
+  if(chart)chart.destroy();
+  chart=new Chart($("chart"),{
+    type:"line",
+    data:{
+      labels,
+      datasets:[{
+        label:selectedSubject+" 점수",
+        data:vals,
+        borderColor:"#20242a",
+        backgroundColor:"rgba(32,36,42,0.1)",
+        borderWidth:2,
+        tension:0.2,
+        fill:true
+      }]
+    },
+    options:{
+      responsive:true,
+      maintainAspectRatio:false,
+      scales:{
+        y:{min:0,max:100}
+      }
+    }
+  });
+}
+function removeItem(id){
+  if(!confirm("이 기록을 삭제하시겠습니까?"))return;
+  data=data.filter(x=>x.id!==id);
+  save();
+  render();
+}
+function openEditTypes(){
+  if(document.getElementById("typeEditOverlay"))return;
+  const overlay=document.createElement("div");
+  overlay.className="modal-overlay";
+  overlay.id="typeEditOverlay";
+  overlay.innerHTML=`
+    <div class="modal">
+      <h3>${selectedSubject} 시험 종류 편집</h3>
+      <div id="typeEditList"></div>
+      <button type="button" class="btn primary modal-close" onclick="closeEditTypes()">닫기</button>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener("click",(e)=>{if(e.target===overlay)closeEditTypes();});
+  renderTypeEditList();
+}
+function renderTypeEditList(){
+  const list=document.getElementById("typeEditList");
+  if(!list)return;
+  const types=getTypesFor(selectedSubject);
+  if(!types.length){
+    list.innerHTML='<div class="empty" style="padding:20px 0">등록된 시험이 없습니다.</div>';
+    return;
+  }
+  list.innerHTML=types.map(t=>`
+    <div class="modal-item">
+      <span>${t}</span>
+      <button type="button" class="btn danger" style="padding:6px 10px;height:auto" onclick="deleteExamType('${t.replace(/'/g,"\\'")}')">삭제</button>
+    </div>`).join("");
+}
+function deleteExamType(t){
+  if(!confirm(`'${t}' 시험 종류를 삭제하시겠습니까?`))return;
+  const types=getTypesFor(selectedSubject);
+  examTypesMap[selectedSubject]=types.filter(x=>x!==t);
+  saveTypes();
+  renderTypeEditList();
+}
+function closeEditTypes(){
+  const overlay=document.getElementById("typeEditOverlay");
+  if(overlay)overlay.remove();
+  render();
+}
+render();
+</script>
+</body>
+</html>
